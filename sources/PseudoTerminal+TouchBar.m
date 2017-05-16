@@ -27,7 +27,7 @@ static NSString *const iTermTouchBarIdentifierNextMark = @"iTermTouchBarIdentifi
 static NSString *const iTermTouchBarIdentifierPreviousMark = @"iTermTouchBarIdentifierPreviousMark";
 static NSString *const iTermTouchBarIdentifierManPage = @"iTermTouchBarIdentifierManPage";
 static NSString *const iTermTouchBarIdentifierColorPreset = @"iTermTouchBarIdentifierColorPreset";
-static NSString *const iTermTouchBarIdentifierFunctionKeys = @"iTermTouchBarIdentifierFunctionKeys";
+static NSString *const iTermTouchBarIdentifierTMUXKeys = @"iTermTouchBarIdentifierFunctionKeys";
 static NSString *const iTermTouchBarIdentifierColorPresetScrollview = @"iTermTouchBarIdentifierColorPresetScrollview";
 static NSString *const iTermTouchBarIdentifierAutocomplete = @"iTermTouchBarIdentifierAutocomplete";
 static NSString *const iTermTouchBarFunctionKeysScrollView  = @"iTermTouchBarFunctionKeysScrollView";
@@ -44,13 +44,13 @@ ITERM_IGNORE_PARTIAL_BEGIN
 
     NSTouchBarItem *item = [self.touchBar itemForIdentifier:iTermTouchBarFunctionKeysScrollView];
     NSScrollView *scrollView = (NSScrollView *)item.view;
-    [self updateTouchBarFunctionKeyLabelsInScrollView:scrollView];
+    [self updateTouchBarTMUXLabelsInScrollView:scrollView];
 
-    NSPopoverTouchBarItem *popoverItem = [self.touchBar itemForIdentifier:iTermTouchBarIdentifierFunctionKeys];
+    NSPopoverTouchBarItem *popoverItem = [self.touchBar itemForIdentifier:iTermTouchBarIdentifierTMUXKeys];
     NSTouchBar *popoverTouchBar = popoverItem.popoverTouchBar;
     item = [popoverTouchBar itemForIdentifier:iTermTouchBarFunctionKeysScrollView];
     scrollView = (NSScrollView *)item.view;
-    [self updateTouchBarFunctionKeyLabelsInScrollView:scrollView];
+    [self updateTouchBarTMUXLabelsInScrollView:scrollView];
     [self updateStatus];
 }
 
@@ -81,19 +81,48 @@ ITERM_IGNORE_PARTIAL_BEGIN
     }
 }
 
-- (void)updateTouchBarFunctionKeyLabelsInScrollView:(NSScrollView *)scrollView {
+- (void)updateTouchBarTMUXLabelsInScrollView:(NSScrollView *)scrollView {
     if (!scrollView) {
         return;
     }
+
+    NSArray *arguments = [NSArray arrayWithObjects: @"list-sessions", @"-F",@"#{?session_attached,$,}#{session_name}", nil];
+    NSString *command = @"/usr/local/bin/tmux";
+    NSTask *task    = [[NSTask alloc] init];
+    task.launchPath = command;
+    task.arguments  = arguments;
+    NSPipe *pipe    = [NSPipe pipe];
+    task.standardOutput = pipe;
+    NSFileHandle *fileHandle = [pipe fileHandleForReading];
+    [task launch];
+    [task waitUntilExit];
+
+    NSData *currentOutput = [fileHandle readDataToEndOfFile];
+    NSString * stringRead = [[[NSString alloc] initWithData:currentOutput encoding:NSUTF8StringEncoding] autorelease];
+    NSArray *sessions=[stringRead componentsSeparatedByString:@"\n"];
+
     NSView *documentView = scrollView.documentView;
-    NSInteger n = 1;
+    NSInteger n = 0;
     for (iTermTouchBarButton *button in [documentView subviews]) {
         if (![button isKindOfClass:[iTermTouchBarButton class]]) {
             continue;
         }
-        NSString *label = [NSString stringWithFormat:@"F%@", @(n)];
-        NSString *customLabel = self.currentSession.keyLabels[label];
-        button.title = customLabel ?: label;
+        if (n < sessions.count - 1) {
+            [button setHidden:false];
+            button.bezelColor = [NSColor blackColor];
+            if ([sessions[n] containsString: @"$"]) {
+                button.bezelColor = [NSColor darkGrayColor];
+                button.title = [sessions[n] substringFromIndex: 1];
+            } else {
+                button.bezelColor = [NSColor blackColor];
+                button.title = sessions[n];
+            }
+
+            button.keyBindingAction = @{ @"command": [NSString stringWithFormat:@"/usr/local/bin/tmux att -t%@", button.title] };
+
+        } else {
+            [button setHidden:true];
+        }
         n++;
     }
 }
@@ -106,7 +135,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
     touchBar.delegate = self;
     touchBar.defaultItemIdentifiers = @[ iTermTouchBarIdentifierManPage,
                                          iTermTouchBarIdentifierColorPreset,
-                                         iTermTouchBarIdentifierFunctionKeys,
+                                         iTermTouchBarIdentifierTMUXKeys,
                                          NSTouchBarItemIdentifierFlexibleSpace,
                                          NSTouchBarItemIdentifierOtherItemsProxy,
                                          iTermTouchBarIdentifierAddMark,
@@ -133,7 +162,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
         }
         NSArray *ids = @[ iTermTouchBarIdentifierManPage,
                           iTermTouchBarIdentifierColorPreset,
-                          iTermTouchBarIdentifierFunctionKeys,
+                          iTermTouchBarIdentifierTMUXKeys,
                           iTermTouchBarFunctionKeysScrollView,
                           NSTouchBarItemIdentifierFlexibleSpace,
                           iTermTouchBarIdentifierAddMark,
@@ -166,6 +195,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
 }
 
 - (void)updateManPageButton:(iTermTouchBarButton *)button word:(NSString *)word {
+
     if (word) {
         if (![button.title isEqualToString:word]) {
             button.title = word;
@@ -185,6 +215,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
     if (!IsTouchBarAvailable()) {
         return nil;
     }
+    
     NSScrollView *scrollView = [[[NSScrollView alloc] init] autorelease];
     NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:iTermTouchBarFunctionKeysScrollView] autorelease];
     item.view = scrollView;
@@ -192,6 +223,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
     documentView.translatesAutoresizingMaskIntoConstraints = NO;
     scrollView.documentView = documentView;
     NSButton *previous = nil;
+
     for (NSInteger n = 1; n <= 20; n++) {
         NSString *label = [NSString stringWithFormat:@"F%@", @(n)];
         iTermTouchBarButton *button = [iTermTouchBarButton buttonWithTitle:label target:self action:@selector(functionKeyTouchBarItemSelected:)];
@@ -206,7 +238,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
         // Constrain last button's right to document view's right
         [self constrainButton:previous toRightOfSuperview:documentView];
     }
-    item.customizationLabel = @"Function Keys";
+    item.customizationLabel = @"TMUX sessions";
     return item;
 }
 
@@ -389,7 +421,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
         secondaryTouchBar.defaultItemIdentifiers = @[ iTermTouchBarIdentifierColorPresetScrollview ];
         item.popoverTouchBar = secondaryTouchBar;
         return item;
-    } else if ([identifier isEqualToString:iTermTouchBarIdentifierFunctionKeys]) {
+    } else if ([identifier isEqualToString:iTermTouchBarIdentifierTMUXKeys]) {
         image = [NSImage imageNamed:@"Touch Bar Function Keys"];
         NSPopoverTouchBarItem *item = [[[NSPopoverTouchBarItem alloc] initWithIdentifier:identifier] autorelease];
         item.customizationLabel = @"Function Keys Popover";
@@ -488,50 +520,51 @@ ITERM_IGNORE_PARTIAL_BEGIN
 }
 
 - (void)functionKeyTouchBarItemSelected:(iTermTouchBarButton *)sender {
-    [self sendFunctionKeyToCurrentSession:sender.tag];
-}
+    NSString *command = sender.keyBindingAction[@"command"];
+    NSString *current = self.currentSession.jobName;
 
-- (void)sendFunctionKeyToCurrentSession:(NSInteger)number {
-    if (number < 1 || number > 20) {
-        return;
+    
+    if ([current isEqualToString: @"tmux"]){
+        NSPoint screenPoint = [NSEvent mouseLocation];
+        NSEvent *currentEvent = [NSApp currentEvent];
+        
+        // Control-b
+        NSEvent *event = [NSEvent keyEventWithType:NSKeyDown
+                                          location:[self.window convertRectFromScreen:NSMakeRect(screenPoint.x, screenPoint.y, 0, 0)].origin
+                                     modifierFlags:([NSEvent modifierFlags] | NSEventModifierFlagControl)
+                                         timestamp:[currentEvent timestamp]
+                                      windowNumber:self.window.windowNumber
+                                           context:nil
+                                        characters:@"b"
+                       charactersIgnoringModifiers:@"b"
+                                         isARepeat:NO
+                                           keyCode:kVK_ANSI_B];
+        [self.currentSession.textview keyDown:event];
+        
+        // S
+        event = [NSEvent keyEventWithType:NSKeyDown
+                                          location:[self.window convertRectFromScreen:NSMakeRect(screenPoint.x, screenPoint.y, 0, 0)].origin
+                                     modifierFlags:([NSEvent modifierFlags])
+                                         timestamp:[currentEvent timestamp]
+                                      windowNumber:self.window.windowNumber
+                                           context:nil
+                                        characters:@"s"
+                       charactersIgnoringModifiers:@"s"
+                                         isARepeat:NO
+                                           keyCode:kVK_ANSI_S];
+        [self.currentSession.textview keyDown:event];
+        
+        [NSThread sleepForTimeInterval:0.01];
+        
+        [self.currentSession insertText:[NSString stringWithFormat: @"%ld", sender.tag - 1]];
+
+        
+    } else {
+        [self.currentSession insertText:command];
+        [self.currentSession insertNewline:iTermTabBarTouchBarIdentifier];
     }
-
-    NSEvent *currentEvent = [NSApp currentEvent];
-    unsigned short keyCodes[] = {
-        kVK_F1,
-        kVK_F2,
-        kVK_F3,
-        kVK_F4,
-        kVK_F5,
-        kVK_F6,
-        kVK_F7,
-        kVK_F8,
-        kVK_F9,
-        kVK_F10,
-        kVK_F11,
-        kVK_F12,
-        kVK_F13,
-        kVK_F14,
-        kVK_F15,
-        kVK_F16,
-        kVK_F17,
-        kVK_F18,
-        kVK_F19,
-        kVK_F20,
-    };
-    NSString *chars = [NSString stringWithFormat:@"%C", (unichar)(NSF1FunctionKey + number - 1)];
-    NSPoint screenPoint = [NSEvent mouseLocation];
-    NSEvent *event = [NSEvent keyEventWithType:NSKeyDown
-                                      location:[self.window convertRectFromScreen:NSMakeRect(screenPoint.x, screenPoint.y, 0, 0)].origin
-                                 modifierFlags:([NSEvent modifierFlags] | NSFunctionKeyMask)
-                                     timestamp:[currentEvent timestamp]
-                                  windowNumber:self.window.windowNumber
-                                       context:nil
-                                    characters:chars
-                   charactersIgnoringModifiers:chars
-                                     isARepeat:NO
-                                       keyCode:keyCodes[number - 1]];
-    [self.currentSession.textview keyDown:event];
+    
+    [self updateTouchBarFunctionKeyLabels];
 }
 
 - (void)candidateListTouchBarItem:(NSCandidateListTouchBarItem *)anItem endSelectingCandidateAtIndex:(NSInteger)index {
